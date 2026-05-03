@@ -30,6 +30,12 @@ sh autogen.sh
 ./configure --prefix=/usr/local
 make -j"$(nproc)"
 sudo make install
+
+# Arch (and some other distros) don't include /usr/local/lib in ld.so search
+# paths by default. Register it once so libcre2.so resolves by short name.
+if ! grep -qsr '^/usr/local/lib$' /etc/ld.so.conf /etc/ld.so.conf.d/ 2>/dev/null; then
+  echo "/usr/local/lib" | sudo tee /etc/ld.so.conf.d/usrlocal.conf >/dev/null
+fi
 sudo ldconfig
 
 echo "[re2-mojo install] 3/3 — sanity check"
