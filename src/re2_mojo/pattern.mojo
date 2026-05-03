@@ -90,6 +90,27 @@ struct Pattern(Movable):
         """Entire string must match (start-anchored AND must consume to end)."""
         return self._do_match(text, 0, CRE2_ANCHOR_BOTH)
 
+    def matches_all(self, text: String) raises -> List[Match]:
+        """All non-overlapping matches. Empty list if none.
+        Zero-width matches advance pos by 1 byte to avoid infinite loops
+        (matches Python re.finditer semantics)."""
+        var results = List[Match]()
+        var pos = 0
+        var text_len = text.byte_length()
+        while pos <= text_len:
+            var m_opt = self.search(text, pos)
+            if not m_opt:
+                break
+            var m = m_opt.value().copy()
+            var end = m.end(0)
+            results.append(m^)
+            if end == pos:
+                # Zero-width match — advance by 1 to make progress.
+                pos = pos + 1
+            else:
+                pos = end
+        return results^
+
     def _do_match(
         self, text: String, pos: Int, anchor: Int32
     ) raises -> Optional[Match]:
