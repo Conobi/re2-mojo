@@ -1,0 +1,6 @@
+.magic/
+.cache/
+__pycache__/
+*.pyc
+.mojo_cache/
+build/
