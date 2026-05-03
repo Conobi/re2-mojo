@@ -19,7 +19,7 @@ from re2_mojo._ffi import (
 )
 from re2_mojo.errors import compile_error, match_error
 from re2_mojo.flags import CompileFlags
-from re2_mojo.`match` import Match
+from re2_mojo.match_result import Match
 
 
 def _build_options(lib: _Cre2Lib, flags: CompileFlags) raises -> CreOptionsPtr:
@@ -116,30 +116,36 @@ struct Pattern(Movable):
 
         # Each cre2_string_t slot is { data: char*, length: int }.
         # Read each slot, compute start/end relative to text base, copy bytes.
+        # Wrap in try/except so the malloc'd buf is always freed even if a
+        # List append or String construction raises mid-loop.
         var text_base = Int(text.unsafe_ptr())
         var captures = List[String]()
         var spans = List[Tuple[Int, Int]]()
-        for i in range(nmatch):
-            var slot = buf + (i * slot_bytes)
-            var data_ptr_addr = slot.bitcast[UInt64]()[0]
-            var length = (slot + 8).bitcast[Int32]()[0]
-            if Int(data_ptr_addr) == 0:
-                # Group did not participate — empty string + (-1, -1) span.
-                captures.append(String(""))
-                spans.append((-1, -1))
-            else:
-                var start = Int(data_ptr_addr) - text_base
-                var end = start + Int(length)
-                # Eagerly copy [start, end) into an owned List[UInt8] -> String.
-                var slice_ptr = UnsafePointer[UInt8, MutAnyOrigin](
-                    unsafe_from_address=Int(data_ptr_addr)
-                )
-                var bytes = List[UInt8]()
-                for j in range(Int(length)):
-                    bytes.append(slice_ptr[j])
-                var captured = String(unsafe_from_utf8=bytes)
-                captures.append(captured^)
-                spans.append((start, end))
+        try:
+            for i in range(nmatch):
+                var slot = buf + (i * slot_bytes)
+                var data_ptr_addr = slot.bitcast[UInt64]()[0]
+                var length = (slot + 8).bitcast[Int32]()[0]
+                if Int(data_ptr_addr) == 0:
+                    # Group did not participate — empty string + (-1, -1) span.
+                    captures.append(String(""))
+                    spans.append((-1, -1))
+                else:
+                    var start = Int(data_ptr_addr) - text_base
+                    var end = start + Int(length)
+                    # Eagerly copy [start, end) into an owned List[UInt8] -> String.
+                    var slice_ptr = UnsafePointer[UInt8, MutAnyOrigin](
+                        unsafe_from_address=Int(data_ptr_addr)
+                    )
+                    var bytes = List[UInt8]()
+                    for j in range(Int(length)):
+                        bytes.append(slice_ptr[j])
+                    var captured = String(unsafe_from_utf8=bytes)
+                    captures.append(captured^)
+                    spans.append((start, end))
+        except e:
+            external_call["free", NoneType](buf)
+            raise e^
 
         external_call["free", NoneType](buf)
         return Match(captures^, spans^)
