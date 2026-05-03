@@ -26,10 +26,11 @@ comptime CreStringPtr = UnsafePointer[NoneType, MutAnyOrigin]
 comptime CCharPtr = UnsafePointer[UInt8, MutAnyOrigin]
 comptime CIntPtr = UnsafePointer[Int32, MutAnyOrigin]
 
-# cre2 anchor constants — match cre2.h (CRE2_UNANCHORED=0, ANCHOR_START=1, ANCHOR_BOTH=2)
-comptime CRE2_UNANCHORED: Int32 = 0
-comptime CRE2_ANCHOR_START: Int32 = 1
-comptime CRE2_ANCHOR_BOTH: Int32 = 2
+# cre2 anchor constants — match cre2.h (CRE2_UNANCHORED=1, ANCHOR_START=2, ANCHOR_BOTH=3)
+# NB: cre2's enum starts at 1, not 0 — verified against /usr/local/include/cre2.h.
+comptime CRE2_UNANCHORED: Int32 = 1
+comptime CRE2_ANCHOR_START: Int32 = 2
+comptime CRE2_ANCHOR_BOTH: Int32 = 3
 
 # cre2 encoding constants (CRE2_UTF8=1, CRE2_Latin1=2)
 comptime CRE2_UTF8: Int32 = 1

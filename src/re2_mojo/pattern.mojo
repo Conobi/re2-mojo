@@ -5,6 +5,7 @@
 # Cannot be stored in stdlib List (which requires Copyable). For collections,
 # use compile_shared() (Task 14) to get a SharedPattern instead.
 
+from std.collections import List, Optional
 from std.ffi import external_call
 from std.memory import UnsafePointer
 from re2_mojo._ffi import (
@@ -12,9 +13,13 @@ from re2_mojo._ffi import (
     CreOptionsPtr,
     CreRegexpPtr,
     CRE2_UTF8,
+    CRE2_UNANCHORED,
+    CRE2_ANCHOR_START,
+    CRE2_ANCHOR_BOTH,
 )
-from re2_mojo.errors import compile_error
+from re2_mojo.errors import compile_error, match_error
 from re2_mojo.flags import CompileFlags
+from re2_mojo.`match` import Match
 
 
 def _build_options(lib: _Cre2Lib, flags: CompileFlags) raises -> CreOptionsPtr:
@@ -72,3 +77,69 @@ struct Pattern(Movable):
         # cre2_delete is safe on a non-null pointer; we never construct
         # Pattern with self._re == null (constructor raises instead).
         self._lib.lib.call["cre2_delete", NoneType](self._re)
+
+    def match(self, text: String, pos: Int = 0) raises -> Optional[Match]:
+        """Anchored match at `pos`. Returns Some(Match) on success, None on no-match."""
+        return self._do_match(text, pos, CRE2_ANCHOR_START)
+
+    def _do_match(
+        self, text: String, pos: Int, anchor: Int32
+    ) raises -> Optional[Match]:
+        # nmatch slots: 1 for group 0 (full match) + N for capturing groups.
+        var ncaps = self._lib.lib.call["cre2_num_capturing_groups", Int32](self._re)
+        var nmatch = Int(ncaps) + 1
+        # Each cre2_string_t slot is 16 bytes on x86-64 (8-byte ptr + 4-byte int + 4 padding).
+        var slot_bytes = 16
+        var buf_size = slot_bytes * nmatch
+        var buf = external_call[
+            "malloc", UnsafePointer[UInt8, MutAnyOrigin]
+        ](buf_size)
+        if not buf:
+            raise match_error("malloc failed for match buffer")
+
+        var text_len = text.byte_length()
+        var endpos = text_len  # whole-string scan after pos
+        var ok = self._lib.lib.call["cre2_match", Int32](
+            self._re,
+            text.unsafe_ptr(),
+            text_len,
+            pos,
+            endpos,
+            anchor,
+            buf,  # cre2_string_t* match[]
+            Int32(nmatch),
+        )
+        if Int(ok) == 0:
+            external_call["free", NoneType](buf)
+            var none_result: Optional[Match] = None
+            return none_result^
+
+        # Each cre2_string_t slot is { data: char*, length: int }.
+        # Read each slot, compute start/end relative to text base, copy bytes.
+        var text_base = Int(text.unsafe_ptr())
+        var captures = List[String]()
+        var spans = List[Tuple[Int, Int]]()
+        for i in range(nmatch):
+            var slot = buf + (i * slot_bytes)
+            var data_ptr_addr = slot.bitcast[UInt64]()[0]
+            var length = (slot + 8).bitcast[Int32]()[0]
+            if Int(data_ptr_addr) == 0:
+                # Group did not participate — empty string + (-1, -1) span.
+                captures.append(String(""))
+                spans.append((-1, -1))
+            else:
+                var start = Int(data_ptr_addr) - text_base
+                var end = start + Int(length)
+                # Eagerly copy [start, end) into an owned List[UInt8] -> String.
+                var slice_ptr = UnsafePointer[UInt8, MutAnyOrigin](
+                    unsafe_from_address=Int(data_ptr_addr)
+                )
+                var bytes = List[UInt8]()
+                for j in range(Int(length)):
+                    bytes.append(slice_ptr[j])
+                var captured = String(unsafe_from_utf8=bytes)
+                captures.append(captured^)
+                spans.append((start, end))
+
+        external_call["free", NoneType](buf)
+        return Match(captures^, spans^)
