@@ -82,6 +82,14 @@ struct Pattern(Movable):
         """Anchored match at `pos`. Returns Some(Match) on success, None on no-match."""
         return self._do_match(text, pos, CRE2_ANCHOR_START)
 
+    def search(self, text: String, pos: Int = 0) raises -> Optional[Match]:
+        """Find first match at or after `pos`. No anchoring."""
+        return self._do_match(text, pos, CRE2_UNANCHORED)
+
+    def fullmatch(self, text: String) raises -> Optional[Match]:
+        """Entire string must match (start-anchored AND must consume to end)."""
+        return self._do_match(text, 0, CRE2_ANCHOR_BOTH)
+
     def _do_match(
         self, text: String, pos: Int, anchor: Int32
     ) raises -> Optional[Match]:
