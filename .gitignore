@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 .mojo_cache/
 build/
+
+# spec-2 build artifacts
+cpp/libre2-mojo/build/
+lib/*.so
