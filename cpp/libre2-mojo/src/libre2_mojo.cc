@@ -1,10 +1,12 @@
 #include "libre2_mojo.h"
 #include <re2/re2.h>
+#include <string>
 
 static_assert(sizeof(re2m_string_t) == 16,
               "re2m_string_t must be 16 bytes (LP64 only in V0)");
 
 struct re2m_options { re2::RE2::Options inner; };
+struct re2m_regexp  { re2::RE2 *re; std::string err; };
 
 extern "C" {
 
@@ -22,5 +24,24 @@ void re2m_opt_set_encoding(re2m_options_t *o, int32_t e) {
 void re2m_opt_set_log_errors(re2m_options_t *o, int32_t v)     { o->inner.set_log_errors(v != 0); }
 void re2m_opt_set_case_sensitive(re2m_options_t *o, int32_t v) { o->inner.set_case_sensitive(v != 0); }
 void re2m_opt_set_dot_nl(re2m_options_t *o, int32_t v)         { o->inner.set_dot_nl(v != 0); }
+
+re2m_regexp_t *re2m_new(const char *p, int32_t plen, const re2m_options_t *o) {
+    auto *r = new re2m_regexp{};
+    /* Quiet (CannedOptions enum value) is implicitly converted to RE2::Options
+     * via Options' converting constructor; suppresses stderr logging on parse
+     * failure. We surface errors via re2m_error_code / re2m_error_string. */
+    r->re = new re2::RE2(re2::StringPiece(p, plen), o ? o->inner : re2::RE2::Quiet);
+    if (!r->re->ok()) r->err = r->re->error();
+    return r;
+}
+void re2m_delete(re2m_regexp_t *r) { delete r->re; delete r; }
+
+int32_t re2m_error_code(const re2m_regexp_t *r) {
+    return r->re->ok() ? 0 : static_cast<int32_t>(r->re->error_code());
+}
+const char *re2m_error_string(const re2m_regexp_t *r) { return r->err.c_str(); }
+int32_t re2m_num_capturing_groups(const re2m_regexp_t *r) {
+    return static_cast<int32_t>(r->re->NumberOfCapturingGroups());
+}
 
 } /* extern "C" */
