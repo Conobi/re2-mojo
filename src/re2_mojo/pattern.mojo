@@ -57,21 +57,33 @@ def _expand_repl(repl: String, m: Match) raises -> String:
 
 def _build_options(lib: _Cre2Lib, flags: CompileFlags) raises -> CreOptionsPtr:
     """Construct a cre2_options_t* with our defaults + caller's flags applied.
-    Caller is responsible for cre2_opt_delete after use."""
+    Caller is responsible for cre2_opt_delete after use.
+
+    Note: `multiline` is NOT applied here. RE2's `one_line` option is only
+    consulted when `posix_syntax=true`; in our default Perl-style mode it's
+    a no-op. Multi-line is instead enabled by prepending `(?m)` to the
+    pattern itself (see `_with_inline_flags`)."""
     var opt = lib.lib.call["cre2_opt_new", CreOptionsPtr]()
     if not opt:
         raise compile_error("cre2_opt_new returned null")
-    # Defaults: UTF-8 always; suppress RE2's stderr logging on bad patterns;
-    # invert one_line so our `multiline=False` matches Python's default.
+    # Defaults: UTF-8 always; suppress RE2's stderr logging on bad patterns.
     lib.lib.call["cre2_opt_set_encoding", NoneType](opt, CRE2_UTF8)
     lib.lib.call["cre2_opt_set_log_errors", NoneType](opt, Int32(0))
-    var one_line: Int32 = Int32(0) if flags.multiline else Int32(1)
-    lib.lib.call["cre2_opt_set_one_line", NoneType](opt, one_line)
     var case_sens: Int32 = Int32(0) if flags.case_insensitive else Int32(1)
     lib.lib.call["cre2_opt_set_case_sensitive", NoneType](opt, case_sens)
     var dot_nl: Int32 = Int32(1) if flags.dot_matches_newline else Int32(0)
     lib.lib.call["cre2_opt_set_dot_nl", NoneType](opt, dot_nl)
     return opt
+
+
+def _with_inline_flags(pattern: String, flags: CompileFlags) -> String:
+    """Prepend RE2 inline flag groups for behaviors that cre2 options do not
+    cover in Perl-syntax mode. Currently only `multiline` (RE2's `one_line`
+    option requires `posix_syntax=true`, which we don't enable, so we use
+    the inline `(?m)` flag instead)."""
+    if flags.multiline:
+        return String("(?m)") + pattern
+    return pattern
 
 
 struct Pattern(Movable):
@@ -88,8 +100,11 @@ struct Pattern(Movable):
         flags: CompileFlags = CompileFlags(),
     ) raises:
         var opt = _build_options(lib, flags)
+        var effective_pattern = _with_inline_flags(pattern, flags)
         var re = lib.lib.call["cre2_new", CreRegexpPtr](
-            pattern.unsafe_ptr(), pattern.byte_length(), opt
+            effective_pattern.unsafe_ptr(),
+            effective_pattern.byte_length(),
+            opt,
         )
         # Always delete options regardless of compile success/failure.
         lib.lib.call["cre2_opt_delete", NoneType](opt)
