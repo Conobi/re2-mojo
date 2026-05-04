@@ -22,6 +22,39 @@ from re2_mojo.flags import CompileFlags
 from re2_mojo.match_result import Match
 
 
+def _expand_repl(repl: String, m: Match) raises -> String:
+    """Expand cre2-style `\\N` backreferences in `repl` against captured groups.
+    `\\0` = full match. `\\\\` -> literal backslash. Unrecognized `\\X` is left
+    literal (both bytes preserved). Out-of-range `\\N` also left literal."""
+    var out = String("")
+    var i = 0
+    var n = repl.byte_length()
+    while i < n:
+        var ch = String(repl[byte=i:i+1])
+        if ch == String("\\") and i + 1 < n:
+            var nxt = String(repl[byte=i+1:i+2])
+            # Digit?
+            if nxt >= String("0") and nxt <= String("9"):
+                var nxt_byte = nxt.unsafe_ptr()[0]
+                var idx = Int(nxt_byte) - 48  # ord('0') == 48
+                if idx <= m.captures_count():
+                    out = out + m.group(idx)
+                else:
+                    # Out-of-range: keep both bytes verbatim.
+                    out = out + ch
+                    out = out + nxt
+                i = i + 2
+                continue
+            # Escaped backslash.
+            if nxt == String("\\"):
+                out = out + String("\\")
+                i = i + 2
+                continue
+        out = out + ch
+        i = i + 1
+    return out^
+
+
 def _build_options(lib: _Cre2Lib, flags: CompileFlags) raises -> CreOptionsPtr:
     """Construct a cre2_options_t* with our defaults + caller's flags applied.
     Caller is responsible for cre2_opt_delete after use."""
@@ -110,6 +143,70 @@ struct Pattern(Movable):
             else:
                 pos = end
         return results^
+
+    def sub(
+        self, repl: String, text: String, count: Int = 0
+    ) raises -> String:
+        """Replace matches with `repl`. count=0 -> all; count=1 -> first only;
+        count=N -> first N. Replacement syntax uses cre2-native `\\1`, `\\2`
+        for backrefs (NOT Python's `\\g<1>` form). `\\0` = full match."""
+        if count == 1:
+            return self._sub_once(repl, text, 0)
+        if count == 0:
+            # Replace all (loop until no more matches).
+            var current = text
+            var pos = 0
+            while True:
+                var m_opt = self.search(current, pos)
+                if not m_opt:
+                    break
+                var mm = m_opt.value().copy()
+                var s = mm.start(0)
+                var e = mm.end(0)
+                var rewritten = _expand_repl(repl, mm)
+                var prefix = String(current[byte=:s])
+                var suffix = String(current[byte=e:])
+                current = prefix + rewritten + suffix
+                pos = s + rewritten.byte_length()
+                if e == s:
+                    pos = pos + 1  # zero-width advance
+            return current^
+        # count > 1: loop count times.
+        var result = text
+        var pos = 0
+        for _ in range(count):
+            var m_opt = self.search(result, pos)
+            if not m_opt:
+                break
+            var mm = m_opt.value().copy()
+            var s = mm.start(0)
+            var e = mm.end(0)
+            var rewritten = _expand_repl(repl, mm)
+            var prefix = String(result[byte=:s])
+            var suffix = String(result[byte=e:])
+            result = prefix + rewritten + suffix
+            pos = s + rewritten.byte_length()
+            if e == s:
+                pos = pos + 1
+        return result^
+
+    def _sub_once(
+        self, repl: String, text: String, pos: Int
+    ) raises -> String:
+        var m_opt = self.search(text, pos)
+        if not m_opt:
+            return text
+        var mm = m_opt.value().copy()
+        var s = mm.start(0)
+        var e = mm.end(0)
+        var rewritten = _expand_repl(repl, mm)
+        return String(text[byte=:s]) + rewritten + String(text[byte=e:])
+
+    def captures_count(self) -> Int:
+        """Number of capturing groups in the compiled pattern (excludes
+        non-capturing groups). Group 0 = full match is NOT counted."""
+        var n = self._lib.lib.call["cre2_num_capturing_groups", Int32](self._re)
+        return Int(n)
 
     def _do_match(
         self, text: String, pos: Int, anchor: Int32
