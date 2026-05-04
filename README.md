@@ -1,8 +1,8 @@
 # re2-mojo
 
 Mojo bindings for [Google RE2](https://github.com/google/re2) — a fast,
-linear-time regular expression engine — via the
-[cre2](https://github.com/marcomaggi/cre2) C-ABI shim.
+linear-time regular expression engine — via an in-tree C++ shim
+(`cpp/libre2-mojo/`) that statically links vendored RE2 + abseil-cpp.
 
 ## Status
 
@@ -11,14 +11,26 @@ V0 — single-process, single-threaded, UTF-8 input, no streaming. See
 
 ## Install
 
-cre2 is not in pacman or AUR. Run the install script once per machine:
+Build the shim once per machine:
 
 ```sh
 bash scripts/install.sh
 ```
 
-Requires `sudo` (pacman) and `~30s` (autotools build of cre2). Idempotent —
-rerun after `pacman -Syu` bumps `re2`.
+The script installs minimal pacman deps (`cmake git pkgconf base-devel`) and
+runs `scripts/build.sh`, which configures CMake, fetches vendored RE2
+(`2024-07-02`) + abseil-cpp (`20240722.0`) via `FetchContent` at pinned
+tags, compiles, and drops `lib/libre2_mojo.so`. Cost: ~30 s first run, ~3 s
+incremental. Idempotent — safe to rerun.
+
+If pacman deps are already satisfied, you can skip the wrapper and call
+`bash scripts/build.sh` directly.
+
+The Mojo binding loads the shim via an **absolute path** baked into
+`_ffi.mojo` — Mojo MCP's `execute` does NOT propagate `LD_LIBRARY_PATH`,
+so system-style short-name resolution is not used. Consumers that embed
+re2-mojo as a sibling project pass the absolute path to
+`OwnedDLHandle("/abs/path/to/lib/libre2_mojo.so")`.
 
 ## Quickstart
 
@@ -65,7 +77,7 @@ Patterns using any of these raise `CompileError` at `compile()` time:
 - Conditional groups: `(?(1)…|…)`
 - Atomic groups, possessive quantifiers, recursive patterns
 
-Replacement (`sub`) uses cre2-native `\1`-style backreferences — NOT Python's
+Replacement (`sub`) uses RE2-native `\1`-style backreferences — NOT Python's
 `\g<1>` form.
 
 V0 input is **UTF-8 only**. Latin-1 / raw-bytes modes are deferred.
@@ -80,5 +92,6 @@ for a future concurrency story.
 
 ## License
 
-MIT (this binding). RE2 and cre2 are BSD-3-Clause; see `LICENSE` for full
-attribution.
+MIT (this binding). RE2 and abseil-cpp are vendored at build time and
+remain under their upstream licenses (BSD-3-Clause and Apache-2.0
+respectively); see `LICENSE` for full attribution.
