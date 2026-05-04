@@ -1,6 +1,7 @@
 #include "libre2_mojo.h"
 #include <re2/re2.h>
 #include <string>
+#include <vector>
 
 static_assert(sizeof(re2m_string_t) == 16,
               "re2m_string_t must be 16 bytes (LP64 only in V0)");
@@ -42,6 +43,37 @@ int32_t re2m_error_code(const re2m_regexp_t *r) {
 const char *re2m_error_string(const re2m_regexp_t *r) { return r->err.c_str(); }
 int32_t re2m_num_capturing_groups(const re2m_regexp_t *r) {
     return static_cast<int32_t>(r->re->NumberOfCapturingGroups());
+}
+
+int32_t re2m_match(const re2m_regexp_t *r, const char *text, int32_t tlen,
+                   int32_t sp, int32_t ep, int32_t anchor,
+                   re2m_string_t *match, int32_t nmatch) {
+    /* Reject negative bounds and out-of-range endpos: RE2::Match takes
+     * size_t, where negative int32 silently wraps to ~2^64. The Mojo
+     * binding never passes negatives in normal use, but this is the
+     * load-bearing C ABI guard. */
+    if (sp < 0 || ep < 0 || tlen < 0 || ep > tlen || nmatch < 0) return 0;
+
+    re2::RE2::Anchor a = anchor == RE2M_ANCHOR_BOTH  ? re2::RE2::ANCHOR_BOTH
+                       : anchor == RE2M_ANCHOR_START ? re2::RE2::ANCHOR_START
+                                                    : re2::RE2::UNANCHORED;
+    /* Stack-allocate small; heap if very large. nmatch is bounded by the
+     * compiled pattern's group count + 1, typically < 16. */
+    re2::StringPiece spans[64];
+    re2::StringPiece *v = spans;
+    std::vector<re2::StringPiece> heap;
+    if (nmatch > 64) { heap.resize(nmatch); v = heap.data(); }
+
+    bool ok = r->re->Match(re2::StringPiece(text, tlen),
+                           static_cast<size_t>(sp), static_cast<size_t>(ep),
+                           a, v, nmatch);
+    if (!ok) return 0;
+    for (int i = 0; i < nmatch; ++i) {
+        match[i].data     = v[i].data();
+        match[i].length   = static_cast<int32_t>(v[i].size());
+        match[i]._padding = 0;
+    }
+    return 1;
 }
 
 } /* extern "C" */
