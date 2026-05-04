@@ -40,12 +40,12 @@ def test_shared_drop_when_zero() raises:
     var sp = compile_shared(String("foo"))
     var sp2 = sp.copy()
     var sp3 = sp2.copy()
-    # All three drop here at last use; cre2_delete fires exactly once when
+    # All three drop here at last use; re2m_delete fires exactly once when
     # refcount hits zero.
     var m = sp3.match(String("foo"))
     if not m:
         raise Error("expected match")
-    print("shared drop sequence OK (no crash; cre2_delete fired once)")
+    print("shared drop sequence OK (no crash; re2m_delete fired once)")
 
 def main() raises:
     test_shared_basic_match()

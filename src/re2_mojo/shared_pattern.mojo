@@ -9,7 +9,7 @@
 #
 # .copy() bumps the refcount and returns a sibling SharedPattern pointing
 # at the same control allocation. __del__ decrements; when it transitions
-# from 1 to 0, the inner Pattern is destroyed (which calls cre2_delete via
+# from 1 to 0, the inner Pattern is destroyed (which calls re2m_delete via
 # Pattern's __del__) and both allocations are freed.
 #
 # Notes on Mojo nightly (0.26.3.0.dev2026042005):
@@ -76,7 +76,7 @@ struct SharedPattern(Copyable, Movable):
         var atomic_ptr = self._rc.bitcast[Atomic[DType.int64]]()
         var prev = atomic_ptr[0].fetch_sub(1)
         if prev == 1:
-            # Last reference - destroy the inner Pattern (calls cre2_delete
+            # Last reference - destroy the inner Pattern (calls re2m_delete
             # via Pattern.__del__) and free both control allocations.
             self._inner.destroy_pointee()
             self._inner.free()

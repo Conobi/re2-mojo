@@ -1,18 +1,14 @@
 from std.ffi import OwnedDLHandle
 from std.memory import UnsafePointer
-from re2_mojo._ffi import _Cre2Lib, open_lib
+from re2_mojo._ffi import _Re2mLib, open_lib
 
 def test_owned_dlhandle_directly() raises:
-    var lib = OwnedDLHandle("libcre2.so")
-    if not lib.check_symbol("cre2_version_string"):
-        raise Error("cre2_version_string symbol missing")
-    var ver_ptr = lib.call[
-        "cre2_version_string", UnsafePointer[UInt8, MutAnyOrigin]
-    ]()
-    if not ver_ptr:
-        raise Error("cre2_version_string returned null")
-    var ver = String(unsafe_from_utf8_ptr=ver_ptr)
-    print("cre2 version:", ver)
+    # Direct OwnedDLHandle smoke test on the shim, independent of _Re2mLib.
+    # Mojo MCP does NOT propagate LD_LIBRARY_PATH, so use the absolute path.
+    var lib = OwnedDLHandle("/home/donokami/Projets/perso/re2-mojo/lib/libre2_mojo.so")
+    if not lib.check_symbol("re2m_opt_new"):
+        raise Error("re2m_opt_new symbol missing")
+    print("libre2_mojo loaded; re2m_opt_new symbol present")
 
 def test_open_lib_succeeds() raises:
     var l = open_lib()

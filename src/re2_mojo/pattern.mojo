@@ -1,6 +1,6 @@
 # Pattern — single-owner regex handle. Movable, NOT Copyable.
-# Wraps cre2_regexp_t* via UnsafePointer[NoneType, MutAnyOrigin].
-# __del__(deinit self) calls cre2_delete.
+# Wraps re2m_regexp_t* via UnsafePointer[NoneType, MutAnyOrigin].
+# __del__(deinit self) calls re2m_delete.
 #
 # Cannot be stored in stdlib List (which requires Copyable). For collections,
 # use compile_shared() (Task 14) to get a SharedPattern instead.
@@ -9,13 +9,13 @@ from std.collections import List, Optional
 from std.ffi import external_call
 from std.memory import UnsafePointer
 from re2_mojo._ffi import (
-    _Cre2Lib,
-    CreOptionsPtr,
-    CreRegexpPtr,
-    CRE2_UTF8,
-    CRE2_UNANCHORED,
-    CRE2_ANCHOR_START,
-    CRE2_ANCHOR_BOTH,
+    _Re2mLib,
+    Re2mOptionsPtr,
+    Re2mRegexpPtr,
+    RE2M_UTF8,
+    RE2M_UNANCHORED,
+    RE2M_ANCHOR_START,
+    RE2M_ANCHOR_BOTH,
 )
 from re2_mojo.errors import compile_error, match_error
 from re2_mojo.flags import CompileFlags
@@ -23,7 +23,7 @@ from re2_mojo.match_result import Match
 
 
 def _expand_repl(repl: String, m: Match) raises -> String:
-    """Expand cre2-style `\\N` backreferences in `repl` against captured groups.
+    """Expand re2m-style `\\N` backreferences in `repl` against captured groups.
     `\\0` = full match. `\\\\` -> literal backslash. Unrecognized `\\X` is left
     literal (both bytes preserved). Out-of-range `\\N` also left literal."""
     var out = String("")
@@ -55,29 +55,29 @@ def _expand_repl(repl: String, m: Match) raises -> String:
     return out^
 
 
-def _build_options(lib: _Cre2Lib, flags: CompileFlags) raises -> CreOptionsPtr:
-    """Construct a cre2_options_t* with our defaults + caller's flags applied.
-    Caller is responsible for cre2_opt_delete after use.
+def _build_options(lib: _Re2mLib, flags: CompileFlags) raises -> Re2mOptionsPtr:
+    """Construct a re2m_options_t* with our defaults + caller's flags applied.
+    Caller is responsible for re2m_opt_delete after use.
 
     Note: `multiline` is NOT applied here. RE2's `one_line` option is only
     consulted when `posix_syntax=true`; in our default Perl-style mode it's
     a no-op. Multi-line is instead enabled by prepending `(?m)` to the
     pattern itself (see `_with_inline_flags`)."""
-    var opt = lib.lib.call["cre2_opt_new", CreOptionsPtr]()
+    var opt = lib.lib.call["re2m_opt_new", Re2mOptionsPtr]()
     if not opt:
-        raise compile_error("cre2_opt_new returned null")
+        raise compile_error("re2m_opt_new returned null")
     # Defaults: UTF-8 always; suppress RE2's stderr logging on bad patterns.
-    lib.lib.call["cre2_opt_set_encoding", NoneType](opt, CRE2_UTF8)
-    lib.lib.call["cre2_opt_set_log_errors", NoneType](opt, Int32(0))
+    lib.lib.call["re2m_opt_set_encoding", NoneType](opt, RE2M_UTF8)
+    lib.lib.call["re2m_opt_set_log_errors", NoneType](opt, Int32(0))
     var case_sens: Int32 = Int32(0) if flags.case_insensitive else Int32(1)
-    lib.lib.call["cre2_opt_set_case_sensitive", NoneType](opt, case_sens)
+    lib.lib.call["re2m_opt_set_case_sensitive", NoneType](opt, case_sens)
     var dot_nl: Int32 = Int32(1) if flags.dot_matches_newline else Int32(0)
-    lib.lib.call["cre2_opt_set_dot_nl", NoneType](opt, dot_nl)
+    lib.lib.call["re2m_opt_set_dot_nl", NoneType](opt, dot_nl)
     return opt
 
 
 def _with_inline_flags(pattern: String, flags: CompileFlags) -> String:
-    """Prepend RE2 inline flag groups for behaviors that cre2 options do not
+    """Prepend RE2 inline flag groups for behaviors that re2m options do not
     cover in Perl-syntax mode. Currently only `multiline` (RE2's `one_line`
     option requires `posix_syntax=true`, which we don't enable, so we use
     the inline `(?m)` flag instead)."""
@@ -90,53 +90,53 @@ struct Pattern(Movable):
     """Single-owner compiled regex. Movable; not Copyable. Use compile_shared()
     if you need to store many patterns in a List or share across owners."""
 
-    var _lib: _Cre2Lib
-    var _re: CreRegexpPtr
+    var _lib: _Re2mLib
+    var _re: Re2mRegexpPtr
 
     def __init__(
         out self,
-        var lib: _Cre2Lib,
+        var lib: _Re2mLib,
         pattern: String,
         flags: CompileFlags = CompileFlags(),
     ) raises:
         var opt = _build_options(lib, flags)
         var effective_pattern = _with_inline_flags(pattern, flags)
-        var re = lib.lib.call["cre2_new", CreRegexpPtr](
+        var re = lib.lib.call["re2m_new", Re2mRegexpPtr](
             effective_pattern.unsafe_ptr(),
             effective_pattern.byte_length(),
             opt,
         )
         # Always delete options regardless of compile success/failure.
-        lib.lib.call["cre2_opt_delete", NoneType](opt)
+        lib.lib.call["re2m_opt_delete", NoneType](opt)
         if not re:
-            raise compile_error("cre2_new returned null for pattern: " + pattern)
-        var err_code = lib.lib.call["cre2_error_code", Int32](re)
+            raise compile_error("re2m_new returned null for pattern: " + pattern)
+        var err_code = lib.lib.call["re2m_error_code", Int32](re)
         if Int(err_code) != 0:
             var err_ptr = lib.lib.call[
-                "cre2_error_string", UnsafePointer[UInt8, MutAnyOrigin]
+                "re2m_error_string", UnsafePointer[UInt8, MutAnyOrigin]
             ](re)
             var err_msg = String(unsafe_from_utf8_ptr=err_ptr) if err_ptr else String("(no error message)")
-            lib.lib.call["cre2_delete", NoneType](re)
+            lib.lib.call["re2m_delete", NoneType](re)
             raise compile_error("invalid pattern '" + pattern + "': " + err_msg)
         self._lib = lib^
         self._re = re
 
     def __del__(deinit self):
-        # cre2_delete is safe on a non-null pointer; we never construct
+        # re2m_delete is safe on a non-null pointer; we never construct
         # Pattern with self._re == null (constructor raises instead).
-        self._lib.lib.call["cre2_delete", NoneType](self._re)
+        self._lib.lib.call["re2m_delete", NoneType](self._re)
 
     def match(self, text: String, pos: Int = 0) raises -> Optional[Match]:
         """Anchored match at `pos`. Returns Some(Match) on success, None on no-match."""
-        return self._do_match(text, pos, CRE2_ANCHOR_START)
+        return self._do_match(text, pos, RE2M_ANCHOR_START)
 
     def search(self, text: String, pos: Int = 0) raises -> Optional[Match]:
         """Find first match at or after `pos`. No anchoring."""
-        return self._do_match(text, pos, CRE2_UNANCHORED)
+        return self._do_match(text, pos, RE2M_UNANCHORED)
 
     def fullmatch(self, text: String) raises -> Optional[Match]:
         """Entire string must match (start-anchored AND must consume to end)."""
-        return self._do_match(text, 0, CRE2_ANCHOR_BOTH)
+        return self._do_match(text, 0, RE2M_ANCHOR_BOTH)
 
     def matches_all(self, text: String) raises -> List[Match]:
         """All non-overlapping matches. Empty list if none.
@@ -163,7 +163,7 @@ struct Pattern(Movable):
         self, repl: String, text: String, count: Int = 0
     ) raises -> String:
         """Replace matches with `repl`. count=0 -> all; count=1 -> first only;
-        count=N -> first N. Replacement syntax uses cre2-native `\\1`, `\\2`
+        count=N -> first N. Replacement syntax uses re2m-native `\\1`, `\\2`
         for backrefs (NOT Python's `\\g<1>` form). `\\0` = full match."""
         if count == 1:
             return self._sub_once(repl, text, 0)
@@ -220,16 +220,16 @@ struct Pattern(Movable):
     def captures_count(self) -> Int:
         """Number of capturing groups in the compiled pattern (excludes
         non-capturing groups). Group 0 = full match is NOT counted."""
-        var n = self._lib.lib.call["cre2_num_capturing_groups", Int32](self._re)
+        var n = self._lib.lib.call["re2m_num_capturing_groups", Int32](self._re)
         return Int(n)
 
     def _do_match(
         self, text: String, pos: Int, anchor: Int32
     ) raises -> Optional[Match]:
         # nmatch slots: 1 for group 0 (full match) + N for capturing groups.
-        var ncaps = self._lib.lib.call["cre2_num_capturing_groups", Int32](self._re)
+        var ncaps = self._lib.lib.call["re2m_num_capturing_groups", Int32](self._re)
         var nmatch = Int(ncaps) + 1
-        # Each cre2_string_t slot is 16 bytes on x86-64 (8-byte ptr + 4-byte int + 4 padding).
+        # Each re2m_string_t slot is 16 bytes on x86-64 (8-byte ptr + 4-byte int + 4 padding).
         var slot_bytes = 16
         var buf_size = slot_bytes * nmatch
         var buf = external_call[
@@ -240,14 +240,14 @@ struct Pattern(Movable):
 
         var text_len = text.byte_length()
         var endpos = text_len  # whole-string scan after pos
-        var ok = self._lib.lib.call["cre2_match", Int32](
+        var ok = self._lib.lib.call["re2m_match", Int32](
             self._re,
             text.unsafe_ptr(),
             text_len,
             pos,
             endpos,
             anchor,
-            buf,  # cre2_string_t* match[]
+            buf,  # re2m_string_t* match[]
             Int32(nmatch),
         )
         if Int(ok) == 0:
@@ -255,7 +255,7 @@ struct Pattern(Movable):
             var none_result: Optional[Match] = None
             return none_result^
 
-        # Each cre2_string_t slot is { data: char*, length: int }.
+        # Each re2m_string_t slot is { data: char*, length: int }.
         # Read each slot, compute start/end relative to text base, eagerly copy
         # captured bytes into an owned String. Mojo statically proves the loop
         # body cannot raise (List/UnsafePointer/String ops here are infallible
