@@ -8,3 +8,13 @@ build/
 # spec-2 build artifacts
 cpp/libre2-mojo/build/
 lib/*.so
+
+# Internal docs — kept local, not committed
+specs/
+plans/
+research/
+docs/project-context.md
+docs/superpowers/
+
+# Local agent guide — kept local
+CLAUDE.md
