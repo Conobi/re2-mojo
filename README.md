@@ -4,33 +4,33 @@ Mojo bindings for [Google RE2](https://github.com/google/re2) — a fast,
 linear-time regular expression engine — via an in-tree C++ shim
 (`cpp/libre2-mojo/`) that statically links vendored RE2 + abseil-cpp.
 
-## Status
-
-V0 — single-process, single-threaded, UTF-8 input, no streaming. See
-`docs/project-context.md` for current scope.
+> [!WARNING]
+> **APIs unstable.** Single-process, single-threaded, UTF-8 input,
+> no streaming.
 
 ## Install
 
-Build the shim once per machine:
+re2-mojo is a Mojo library. Build it with [`mojox`](https://pypi.org/project/mojox/)
+under [`uv`](https://docs.astral.sh/uv/):
 
 ```sh
-bash scripts/install.sh
+git clone https://github.com/Conobi/re2-mojo.git
+cd re2-mojo
+uv sync   # pulls mojox + the Mojo compiler, runs scripts/build.sh as pre-build
 ```
 
-The script installs minimal pacman deps (`cmake git pkgconf base-devel`) and
-runs `scripts/build.sh`, which configures CMake, fetches vendored RE2
-(`2024-07-02`) + abseil-cpp (`20240722.0`) via `FetchContent` at pinned
-tags, compiles, and drops `lib/libre2_mojo.so`. Cost: ~30 s first run, ~3 s
-incremental. Idempotent — safe to rerun.
+`uv sync` invokes `mojox-build`, which runs `scripts/build.sh` to fetch
+vendored RE2 (`2024-07-02`) + abseil-cpp (`20240722.0`) via CMake
+`FetchContent` at pinned tags, compile, and drop `lib/libre2_mojo.so`.
+Cost: ~30 s first run, ~3 s incremental. Requires `cmake`, `git`,
+`pkgconf`, and a C++ toolchain on `PATH`.
 
-If pacman deps are already satisfied, you can skip the wrapper and call
-`bash scripts/build.sh` directly.
+If you only want the shim (no `uv`), run `bash scripts/install.sh`
+(adds the pacman deps then calls `scripts/build.sh`).
 
-The Mojo binding loads the shim via an **absolute path** baked into
-`_ffi.mojo` — Mojo MCP's `execute` does NOT propagate `LD_LIBRARY_PATH`,
-so system-style short-name resolution is not used. Consumers that embed
-re2-mojo as a sibling project pass the absolute path to
-`OwnedDLHandle("/abs/path/to/lib/libre2_mojo.so")`.
+At import time the shim is resolved by `_ffi.mojo`: bare soname first
+(picks up RUNPATH from the mojox wheel, or `LD_LIBRARY_PATH` /
+`ld.so.cache`), then CWD-relative `lib/libre2_mojo.so` as a fallback.
 
 ## Quickstart
 
@@ -58,37 +58,56 @@ def main() raises:
     var p2 = compile(String("^FOO"), flags)
 ```
 
+Runnable examples under `examples/` (`lexer_table_demo.mojo`,
+`url_split_demo.mojo`).
+
 ## API
 
-- `compile(pattern: String, flags: CompileFlags = CompileFlags()) raises -> Pattern`
-- `compile_shared(pattern: String, flags: CompileFlags = CompileFlags()) raises -> SharedPattern`
-- `Pattern(Movable)` methods: `match`, `search`, `fullmatch`, `matches_all`, `sub`, `captures_count`
-- `SharedPattern(Copyable, Movable)` — same methods plus `.copy()` to share
-- `Match(Copyable, Movable)` — `group(n)`, `start(n)`, `end(n)`, `span(n)`, `captures_count()`. Self-owning: each capture's bytes are eagerly copied at construction; the input string need not outlive the Match.
-- `CompileFlags(Copyable, Movable)` — fields `multiline`, `case_insensitive`, `dot_matches_newline`
+| Call | Returns | Notes |
+|---|---|---|
+| `compile(s, flags?)` | `Pattern` | Movable, NOT Copyable. |
+| `compile_shared(s, flags?)` | `SharedPattern` | Copyable + Movable; use for collections. |
+| `Pattern.match(s)` | `Optional[Match]` | Anchored at both ends. |
+| `Pattern.search(s)` | `Optional[Match]` | Unanchored. |
+| `Pattern.fullmatch(s)` | `Optional[Match]` | Anchored; must consume all input. |
+| `Pattern.matches_all(s)` | `List[Match]` | All non-overlapping matches. |
+| `Pattern.sub(s, repl)` | `String` | RE2-native `\1` backrefs — not Python's `\g<1>`. |
+| `Pattern.captures_count()` | `Int` | |
+
+`Match(Copyable, Movable)` — `group(n)`, `start(n)`, `end(n)`,
+`span(n)`, `captures_count()`. Self-owning: capture bytes are eagerly
+copied at construction, so the input string need not outlive the Match.
+
+`CompileFlags(Copyable, Movable)` — `multiline`, `case_insensitive`,
+`dot_matches_newline`.
 
 ## Semantic limits
 
-RE2 is strictly regular and rejects features that exit regular languages.
-Patterns using any of these raise `CompileError` at `compile()` time:
-
-- Backreferences: `\1`, `\g<name>`
-- Lookahead / lookbehind: `(?=…)`, `(?!…)`, `(?<=…)`, `(?<!…)`
-- Conditional groups: `(?(1)…|…)`
-- Atomic groups, possessive quantifiers, recursive patterns
-
-Replacement (`sub`) uses RE2-native `\1`-style backreferences — NOT Python's
-`\g<1>` form.
-
-V0 input is **UTF-8 only**. Latin-1 / raw-bytes modes are deferred.
+RE2 is strictly regular and rejects features that exit regular
+languages. Patterns using backreferences (`\1`, `\g<name>`), lookahead
+or lookbehind (`(?=…)`, `(?<=…)`), conditional groups (`(?(1)…|…)`),
+atomic groups, possessive quantifiers, or recursion raise
+`CompileError` at `compile()` time. Input is UTF-8 only; Latin-1 and
+raw-bytes modes are deferred.
 
 ## Concurrency
 
-`Pattern` and `SharedPattern` are not yet documented as thread-safe in V0.
-RE2 itself is logically immutable and supports concurrent matches; we'll
-add explicit thread-safety guarantees once Mojo's concurrency model is
-formalized. SharedPattern's refcount uses atomic primitives so it's ready
-for a future concurrency story.
+re2-mojo is not yet documented as thread-safe. RE2 itself is logically
+immutable and supports concurrent matches; explicit guarantees will
+land once Mojo's concurrency model is formalized. `SharedPattern`'s
+refcount uses atomic primitives, so it's ready for a future
+concurrency story.
+
+## Project layout
+
+```
+src/re2_mojo/      Mojo bindings (public API + _ffi loader)
+cpp/libre2-mojo/   C++ shim (vendors RE2 + abseil-cpp via FetchContent)
+scripts/           install + build helpers
+lib/               built `.so` (gitignored; .gitkeep tracked)
+examples/          runnable demos
+tests/             Mojo test suite
+```
 
 ## License
 
