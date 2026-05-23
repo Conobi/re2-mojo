@@ -101,7 +101,7 @@ concurrency story.
 ## Project layout
 
 ```
-src/re2_mojo/      Mojo bindings (public API + _ffi loader)
+re2_mojo/          Mojo bindings (public API + _ffi loader)
 cpp/libre2-mojo/   C++ shim (vendors RE2 + abseil-cpp via FetchContent)
 scripts/           install + build helpers
 lib/               built `.so` (gitignored; .gitkeep tracked)
