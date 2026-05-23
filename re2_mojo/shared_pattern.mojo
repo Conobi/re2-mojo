@@ -12,16 +12,9 @@
 # from 1 to 0, the inner Pattern is destroyed (which calls re2m_delete via
 # Pattern's __del__) and both allocations are freed.
 #
-# Notes on Mojo nightly (0.26.3.0.dev2026042005):
-# - Explicit __copyinit__ is broken; we opt into Copyable via `fn copy(self)
-#   -> Self`. List[SharedPattern] uses .copy() internally for grow/insert.
-# - Atomic[DType.int64] is NOT Movable, so we can't put it directly inside
-#   a Movable control struct. Workaround: alloc Int64, write 1, then for
-#   each refcount op bitcast the pointer to Atomic[DType.int64]*.
-# - The "alt constructor that takes raw pointers" pattern (used by .copy()
-#   to construct a sibling without re-allocating) is the chosen idiom for
-#   _from_ctrl-style construction; struct-literal `Self {...}` is not
-#   accepted in this nightly.
+# Atomic[DType.int64] is NOT Movable, so we can't put it directly inside
+# a Movable struct. Workaround: alloc Int64, write 1, then for each
+# refcount op bitcast the pointer to Atomic[DType.int64]*.
 #
 # Direct field access on a SharedPattern from outside (e.g. `sp.inner[0]...`)
 # is unsafe under Mojo's ASAP-destruction; all interaction MUST go through

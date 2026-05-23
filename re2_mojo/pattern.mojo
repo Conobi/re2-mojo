@@ -3,11 +3,10 @@
 # __del__(deinit self) calls re2m_delete.
 #
 # Cannot be stored in stdlib List (which requires Copyable). For collections,
-# use compile_shared() (Task 14) to get a SharedPattern instead.
+# use compile_shared() to get a SharedPattern instead.
 
 from std.collections import List, Optional
-from std.ffi import external_call
-from std.memory import UnsafePointer
+from std.memory import UnsafePointer, alloc
 from re2_mojo._ffi import (
     _Re2mLib,
     Re2mOptionsPtr,
@@ -63,10 +62,10 @@ def _build_options(lib: _Re2mLib, flags: CompileFlags) raises -> Re2mOptionsPtr:
     consulted when `posix_syntax=true`; in our default Perl-style mode it's
     a no-op. Multi-line is instead enabled by prepending `(?m)` to the
     pattern itself (see `_with_inline_flags`)."""
-    var opt = lib.lib.call["re2m_opt_new", Re2mOptionsPtr]()
-    if not opt:
+    var opt_result = lib.lib.call["re2m_opt_new", Optional[Re2mOptionsPtr]]()
+    if not opt_result:
         raise compile_error("re2m_opt_new returned null")
-    # Defaults: UTF-8 always; suppress RE2's stderr logging on bad patterns.
+    var opt = opt_result.value()
     lib.lib.call["re2m_opt_set_encoding", NoneType](opt, RE2M_UTF8)
     lib.lib.call["re2m_opt_set_log_errors", NoneType](opt, Int32(0))
     var case_sens: Int32 = Int32(0) if flags.case_insensitive else Int32(1)
@@ -101,21 +100,21 @@ struct Pattern(Movable):
     ) raises:
         var opt = _build_options(lib, flags)
         var effective_pattern = _with_inline_flags(pattern, flags)
-        var re = lib.lib.call["re2m_new", Re2mRegexpPtr](
+        var re_result = lib.lib.call["re2m_new", Optional[Re2mRegexpPtr]](
             effective_pattern.unsafe_ptr(),
             effective_pattern.byte_length(),
             opt,
         )
-        # Always delete options regardless of compile success/failure.
         lib.lib.call["re2m_opt_delete", NoneType](opt)
-        if not re:
+        if not re_result:
             raise compile_error("re2m_new returned null for pattern: " + pattern)
+        var re = re_result.value()
         var err_code = lib.lib.call["re2m_error_code", Int32](re)
         if Int(err_code) != 0:
             var err_ptr = lib.lib.call[
-                "re2m_error_string", UnsafePointer[UInt8, MutAnyOrigin]
+                "re2m_error_string", Optional[UnsafePointer[UInt8, MutAnyOrigin]]
             ](re)
-            var err_msg = String(unsafe_from_utf8_ptr=err_ptr) if err_ptr else String("(no error message)")
+            var err_msg = String(unsafe_from_utf8_ptr=err_ptr.value()) if err_ptr else String("(no error message)")
             lib.lib.call["re2m_delete", NoneType](re)
             raise compile_error("invalid pattern '" + pattern + "': " + err_msg)
         self._lib = lib^
@@ -232,11 +231,7 @@ struct Pattern(Movable):
         # Each re2m_string_t slot is 16 bytes on x86-64 (8-byte ptr + 4-byte int + 4 padding).
         var slot_bytes = 16
         var buf_size = slot_bytes * nmatch
-        var buf = external_call[
-            "malloc", UnsafePointer[UInt8, MutAnyOrigin]
-        ](buf_size)
-        if not buf:
-            raise match_error("malloc failed for match buffer")
+        var buf = alloc[UInt8](buf_size)
 
         var text_len = text.byte_length()
         var endpos = text_len  # whole-string scan after pos
@@ -251,15 +246,13 @@ struct Pattern(Movable):
             Int32(nmatch),
         )
         if Int(ok) == 0:
-            external_call["free", NoneType](buf)
+            buf.free()
             var none_result: Optional[Match] = None
             return none_result^
 
         # Each re2m_string_t slot is { data: char*, length: int }.
         # Read each slot, compute start/end relative to text base, eagerly copy
-        # captured bytes into an owned String. Mojo statically proves the loop
-        # body cannot raise (List/UnsafePointer/String ops here are infallible
-        # in 0.26.x), so no try/except — buf is freed unconditionally below.
+        # captured bytes into an owned String.
         var text_base = Int(text.unsafe_ptr())
         var captures = List[String]()
         var spans = List[Tuple[Int, Int]]()
@@ -285,5 +278,5 @@ struct Pattern(Movable):
                 captures.append(captured^)
                 spans.append((start, end))
 
-        external_call["free", NoneType](buf)
+        buf.free()
         return Match(captures^, spans^)
