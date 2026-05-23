@@ -38,6 +38,24 @@ comptime RE2M_ANCHOR_BOTH: Int32 = 3
 comptime RE2M_UTF8: Int32 = 1
 
 
+def _open_libre2() raises -> OwnedDLHandle:
+    """Locate and dlopen libre2_mojo.so across deployment modes.
+
+    Search order (mirrors navette/compress/lib.mojo `_open_libcompress`):
+      1. Bare soname — resolves via RUNPATH (mojox-build injects the venv's
+         mojo_packages/lib for wheel-installed packages) or LD_LIBRARY_PATH /
+         ld.so.cache.
+      2. CWD-relative `lib/libre2_mojo.so` — for `mojo run` from the repo
+         root, and for Mojo MCP `execute` invocations whose `cwd` is the
+         re2-mojo checkout (MCP does NOT propagate LD_LIBRARY_PATH, so the
+         bare soname can fail there even when the .so is built).
+    """
+    try:
+        return OwnedDLHandle("libre2_mojo.so")
+    except:
+        return OwnedDLHandle("lib/libre2_mojo.so")
+
+
 struct _Re2mLib(Movable):
     """Singleton-ish wrapper around the libre2_mojo DLHandle. Constructed on
     first Pattern compile. Validates every symbol we use exists; raises if not.
@@ -47,12 +65,7 @@ struct _Re2mLib(Movable):
     var lib: OwnedDLHandle
 
     def __init__(out self) raises:
-        # Absolute path: Mojo MCP does NOT propagate LD_LIBRARY_PATH, so the
-        # short-name form (`OwnedDLHandle("libre2_mojo.so")`) fails to resolve.
-        # The shim ships at <repo>/lib/libre2_mojo.so; hardcode the canonical
-        # development checkout path here (see CLAUDE.md / README for the
-        # project layout assumption).
-        self.lib = OwnedDLHandle("/home/donokami/Projets/perso/re2-mojo/lib/libre2_mojo.so")
+        self.lib = _open_libre2()
         # Gate every symbol we'll use. Missing symbols would ABORT the process,
         # so check up-front and raise a clean Mojo Error instead.
         var required: List[String] = [

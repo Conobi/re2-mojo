@@ -1,0 +1,66 @@
+[project]
+name = "re2-mojo"
+version = "0.1.0"
+description = "Mojo bindings to Google RE2 via an in-tree C++ shim (vendored RE2 + abseil-cpp)"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = [
+    "mojo-compiler==1.0.0b1",
+]
+
+[build-system]
+requires = [
+    "mojox-build>=0.3.0",
+    "mojo-compiler==1.0.0b1",
+    "mojo-compiler-mojo-libs==1.0.0b1",
+]
+build-backend = "mojox_build"
+
+[tool.uv]
+prerelease = "allow"
+
+[tool.mojox-build]
+package-root = "src"
+packages     = ["re2_mojo"]
+
+# Build the C++ shim (libre2_mojo.so) before mojox-build compiles the Mojo
+# package. scripts/build.sh runs CMake with FetchContent to pull pinned RE2
+# (2024-07-02) + abseil-cpp (20240722.0) and static-link them. Consumers need
+# cmake, git, pkgconf, and a C++ toolchain on PATH at build time. Cold first
+# run ~30 s; incremental ~3 s.
+pre-build = [
+    "bash scripts/build.sh",
+]
+native-libs = [
+    "lib/libre2_mojo.so",
+]
+
+# Sdist hygiene — mirrors navette. mojox-build does NOT honour .gitignore,
+# so anything kept local-only must be excluded explicitly. Patterns use
+# Python fnmatch (`*` is greedy across `/`, so one pattern covers a subtree).
+#
+# Keep: src/re2_mojo, cpp/libre2-mojo (shim source, needed for rebuild),
+# scripts/, README, LICENSE, examples/, tests/, pyproject.toml.
+# Drop: built artefacts under lib/ and cpp/*/build/, internal working docs,
+# agent-local CLAUDE.md, the pre-rewrite git backup.
+source-exclude = [
+    # Prebuilt native shim (sdist consumers rebuild via pre-build)
+    "lib/*",
+    # CMake / FetchContent build outputs inside the shim source tree
+    "cpp/*/build/*",
+    "cpp/*/_deps/*",
+    # Internal working files (gitignored, kept local-only)
+    "specs/*",
+    "plans/*",
+    "research/*",
+    "docs/project-context.md",
+    "docs/superpowers/*",
+    # Misc
+    ".git.bak.*",
+    "CLAUDE.md",
+    "*/__pycache__/*",
+    "*.pyc",
+    ".mojo_cache/*",
+    ".cache/*",
+    ".magic/*",
+]
