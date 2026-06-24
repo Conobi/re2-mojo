@@ -38,8 +38,25 @@ comptime RE2M_ANCHOR_BOTH: Int32 = 3
 comptime RE2M_UTF8: Int32 = 1
 
 
+# Open flags: RTLD_NOW (resolve eagerly) | RTLD_NODELETE. NODELETE keeps the
+# engine mapped for the WHOLE process — dlclose() never unmaps it. The shim
+# statically links RE2 + abseil, which register thread-local destructors; if the
+# library were unmapped when a Pattern handle is torn down while a worker-pool
+# thread is still running its TLS destructors, that thread would jump into freed
+# code and crash. Keeping it mapped (a process-lifetime native dependency, like
+# libc) removes that teardown race at the source.
+comptime _RTLD_NOW = 0x00002
+comptime _RTLD_NODELETE = 0x01000
+comptime _RE2_OPEN_FLAGS = _RTLD_NOW | _RTLD_NODELETE
+
+
 def _open_libre2() raises -> OwnedDLHandle:
     """Locate and dlopen libre2_mojo.so across deployment modes.
+
+    Opened RTLD_NODELETE so the engine stays mapped for the process lifetime:
+    a later dlclose() (at Pattern teardown) never unmaps it, which avoids a
+    race where a worker-pool TLS destructor of the statically-linked RE2/abseil
+    runtime jumps into an unmapped library during process exit.
 
     Search order (mirrors navette/compress/lib.mojo `_open_libcompress`):
       1. Bare soname — resolves via RUNPATH (mojox-build injects the venv's
@@ -51,9 +68,9 @@ def _open_libre2() raises -> OwnedDLHandle:
          bare soname can fail there even when the .so is built).
     """
     try:
-        return OwnedDLHandle("libre2_mojo.so")
+        return OwnedDLHandle("libre2_mojo.so", _RE2_OPEN_FLAGS)
     except:
-        return OwnedDLHandle("lib/libre2_mojo.so")
+        return OwnedDLHandle("lib/libre2_mojo.so", _RE2_OPEN_FLAGS)
 
 
 struct _Re2mLib(Movable):

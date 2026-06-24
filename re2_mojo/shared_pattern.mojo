@@ -34,8 +34,8 @@ struct SharedPattern(Copyable, Movable):
     all multiline/case_insensitive/dot_matches_newline handling from the
     underlying compile() factory."""
 
-    var _rc: UnsafePointer[Int64, MutExternalOrigin]
-    var _inner: UnsafePointer[Pattern, MutExternalOrigin]
+    var _rc: UnsafePointer[Int64, MutUntrackedOrigin]
+    var _inner: UnsafePointer[Pattern, MutUntrackedOrigin]
 
     def __init__(out self, var inner: Pattern):
         # Allocate the refcount slot and initialize to 1.
@@ -49,8 +49,8 @@ struct SharedPattern(Copyable, Movable):
 
     def __init__(
         out self,
-        rc: UnsafePointer[Int64, MutExternalOrigin],
-        inner: UnsafePointer[Pattern, MutExternalOrigin],
+        rc: UnsafePointer[Int64, MutUntrackedOrigin],
+        inner: UnsafePointer[Pattern, MutUntrackedOrigin],
     ):
         """Internal alt constructor used by .copy() to build a sibling
         SharedPattern that shares the same control allocations. Does NOT
